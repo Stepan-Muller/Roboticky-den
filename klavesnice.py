@@ -15,28 +15,29 @@ clock = pygame.time.Clock()
 speed = 50
 
 running = True
+pressed = False
 while running:
+	pygame.event.pump()
+	
 	for event in pygame.event.get():
 		if event.type == pygame.QUIT:
 			running = False
 	
 	keys = pygame.key.get_pressed()
-	
-	print(parser.read_serial())
+
+	parser.read_serial()
 
 	if keys[pygame.K_a]:
-		parser.send_serial(True, 100 - speed, 100 + speed, False, False, False)
+		parser.send_serial(True, -speed, speed, False, False, False)
 	elif keys[pygame.K_d]:
-		parser.send_serial(True, 100 + speed, 100 - speed, False, False, False)
+		parser.send_serial(True, speed, -speed, False, False, False)
 	elif keys[pygame.K_s]:
-		parser.send_serial(True, 100 + speed, 100 + speed, False, False, False)
+		parser.send_serial(True, -speed, -speed, False, False, False)
 	elif keys[pygame.K_w]:
-		parser.send_serial(True, 100 - speed, 100 - speed, False, False, False)
+		parser.send_serial(True, speed, speed, False, False, False)
 	else:
-		parser.send_serial(True, 100, 100, False, False, False)
+		parser.send_serial(True, 0, 0, False, False, False)
 	
-	clock.tick(10)
-	
-	pygame.event.pump()
+	clock.tick(50)
 	
 pygame.quit()

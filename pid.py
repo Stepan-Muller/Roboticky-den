@@ -24,8 +24,8 @@ def pid(error):
 	
 	return PID
 
-target_speed = 90
-max_speed = 100
+target_speed = 40
+max_speed = 50
 
 def pid_motor(error):
 	PID = pid(error)
@@ -33,4 +33,4 @@ def pid_motor(error):
 	motor_l = int(max(min(target_speed - PID, max_speed), -max_speed))
 	motor_r = int(max(min(target_speed + PID, max_speed), -max_speed))
 	
-	parser.send_serial(True, 100 + motor_l, 100 + motor_r, False, False, False)
+	parser.send_serial(True, motor_l, motor_r, False, False, False)
