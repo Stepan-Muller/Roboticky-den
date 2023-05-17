@@ -25,7 +25,7 @@ while running:
 	
 	keys = pygame.key.get_pressed()
 
-	parser.read_serial()
+	print(parser.read_serial())
 
 	if keys[pygame.K_a]:
 		parser.send_serial(True, -speed, speed, False, False, False)

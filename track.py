@@ -6,21 +6,17 @@ from picamera2 import Picamera2
 import numpy as np
 import time
 
-lower_green = np.array([10, 90, 70])
-upper_green = np.array([90, 255, 255])
-highlight_green = ([0, 255, 0])
-
 # Cervena do fialova
-lower_red_1 = np.array([120, 90, 70])
+lower_red_1 = np.array([120, 120, 70])
 upper_red_1 = np.array([180, 255, 255])
-highlight_red_1 = ([255, 0, 255])
 
 # Cervena do oranzova
-lower_red_2 = np.array([0, 90, 70])
+lower_red_2 = np.array([0, 120, 70])
 upper_red_2 = np.array([30, 255, 255])
-highlight_red_2 = ([0, 0, 255])
 
-lower_blue = np.array([80, 150, 70])
+highlight_red = ([0, 0, 255])
+
+lower_blue = np.array([95, 150, 90])
 upper_blue = np.array([110, 255, 255])
 highlight_blue = ([255, 0, 0])
 
@@ -46,11 +42,11 @@ def go_straight_seconds(seconds):
 	start_time = time.time()
 	
 	while time.time() < start_time + seconds:
-		parser.send_serial(True, 100, 100, False, False, False)
+		parser.send_serial(True, 70, 70, False, False, False)
 		
 		time.sleep(0.1)
 
-def get_contours(frame, lower_color, upper_color):
+def get_color_mask(frame, lower_color, upper_color):
 	hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 	
 	mask = cv2.inRange(hsv, lower_color, upper_color)
@@ -59,16 +55,30 @@ def get_contours(frame, lower_color, upper_color):
 	mask = cv2.erode(mask, kernel, iterations=1)
 	mask = cv2.dilate(mask, kernel, iterations=1)
 	
-	contours, hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	return mask
+
+def get_distance_from_camera(x, y):
+	angle_vertical = (y / -height + 0.5) * camera_fov_vertical + camera_angle
+	angle_horizontal = (x / -width + 0.5) * camera_fov_horizontal
 	
-	return contours
+	dist_x = camera_height / np.cos(np.deg2rad(angle_vertical)) + camera_x_offset
+	dist = dist_x / np.cos(np.deg2rad(angle_horizontal)) + camera_y_offset
+	
+	return dist
+	
 
 def get_contours_of_area(contours, min_area, max_area):
 	correct_contours = []
 	
 	for contour in contours:
+		vertical, horizontal, w, h = cv2.boundingRect(contour)
+		dist = get_distance_from_camera(vertical + w / 2, horizontal + h)
+		
 		area = cv2.contourArea(contour)
-		if area > 50:
+		
+		adj_area = np.tan(np.deg2rad(np.sqrt(area) / width * camera_fov_horizontal)) * dist
+		
+		if adj_area > min_area and adj_area < max_area:
 			correct_contours.append(contour)
 	
 	return correct_contours
@@ -86,78 +96,94 @@ def get_coords_from_camera(x, y):
 	
 	return dist_x, dist_y
 
-def find_at_coords(contours, x_goal, y_goal):
-	min_sqr_dist = float("inf")
+def find_at_coords(contours, x_goal, y_goal, max_dist):
+	min_sqr_dist = pow(max_dist, 2)
+	found = False
+	closest = contours[0]
+	closest_x = 0
+	closest_y = 0
 	
 	for contour in contours:
 		vertical, horizontal, w, h = cv2.boundingRect(contour)
-		x, y = get_coords_from_camera(vertical + w / 2, horizontal + h / 2)
+		x, y = get_coords_from_camera(vertical + w / 2, horizontal + h)
 		
 		sqr_dist = pow(x - x_goal, 2) + pow(y - y_goal, 2)
 		
 		if sqr_dist < min_sqr_dist:
 			min_sqr_dist = sqr_dist
+			found = True
 			closest = contour
 			closest_x = x
 			closest_y = y
 			
-	return closest, closest_x, closest_y
+	return found, closest, closest_x, closest_y
+
+running = True
 
 locked_x = 0
 locked_y = 0
 
 last_y = float("inf")
-while True:
+while True:	
 	# Vzit obraz z kamery
 	frame = picam2.capture_array()
 	
 	# Oprava barvy kamery (BGR na RGB)
 	frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 	
-	# Najit puky v obraze
-	green_contours = get_contours(frame, lower_green, upper_green)
+	# Najit barvu v obraze
+	blue_mask = get_color_mask(frame, lower_blue, upper_blue)
 	
-	red_1_contours = get_contours(frame, lower_red_1, upper_red_1)
-	red_2_contours = get_contours(frame, lower_red_2, upper_red_2)
+	red_1_mask = get_color_mask(frame, lower_red_1, upper_red_1)
+	red_2_mask = get_color_mask(frame, lower_red_2, upper_red_2)
+	
+	# Sloučit dve cervene masky
+	red_mask = cv2.bitwise_or(red_1_mask, red_2_mask)
+	
+	# Najit puky v obraze
+	blue_contours, hierarchy = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+	red_contours, hierarchy = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	
 	# Najit pouze puky o spravne velikosti
-	green_pucks = get_contours_of_area(green_contours, 30, 1000)
-
-	red_1_pucks = get_contours_of_area(red_1_contours, 30, 1000)
-	red_2_pucks = get_contours_of_area(red_2_contours, 30, 1000)
+	blue_pucks = get_contours_of_area(blue_contours, 2, 5)
+	red_pucks = get_contours_of_area(red_contours, 2, 5)
 	
 	# Vykreslit puky
-	highlight_contours(green_pucks, highlight_green)
-
-	highlight_contours(red_1_pucks, highlight_red_1)
-	highlight_contours(red_2_pucks, highlight_red_2)
+	highlight_contours(blue_pucks, highlight_blue)
+	highlight_contours(red_pucks, highlight_red)
 	
-	pucks = green_pucks + red_1_pucks + red_2_pucks
+	pucks = blue_pucks + red_pucks
 
 	if len(pucks) > 0:
-		target, locked_x, locked_y = find_at_coords(pucks, locked_x, locked_y)
+		found, target, locked_x, locked_y = find_at_coords(pucks, locked_x, locked_y, 200)
 		
-		x,y,w,h = cv2.boundingRect(target)
-		
-		if last_y == height and not y + h == height:
-			print("konec")
-			go_straight_seconds(0.5)
-		
-		last_y = y + h
-		
-		cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 255, 255), 2)
-		target = int(x + w / 2)
-		
-		# Nakreslit caru smeru puku (cil)
-		cv2.line(frame, (target, 0), (target, 480), (0, 0, 255), 2)
-		error = width / 2 - target
-		
-		if abs(error) < 20:
-			error = 0
-		
-		pid.pid_motor(error)
+		if found:
+			x,y,w,h = cv2.boundingRect(target)
+			
+			if last_y == height and not y + h == height:
+				print("konec")
+				go_straight_seconds(0.5)
+			
+			last_y = y + h
+			
+			cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 255, 255), 2)
+			target = int(x + w / 2)
+			
+			# Nakreslit caru smeru puku (cil)
+			cv2.line(frame, (target, 0), (target, 480), (0, 0, 255), 2)
+			error = width / 2 - target
+			
+			if abs(error) < 20:
+				error = 0
+			
+			if running:
+				pid.pid_motor(error)
+			else:
+				parser.send_serial(False, 0, 0, False, False, False)
+		else:
+			parser.send_serial(running, 70, -70, False, False, False)
 	else:
-		parser.send_serial(True, -70, 70, False, False, False)
+		parser.send_serial(running, 70, -70, False, False, False)
 	
 	# Nakreslit stredovou caru (cil)
 	cv2.line(frame, (int(width / 2), 0), (int(width / 2), height), (0, 255, 0), 2)
