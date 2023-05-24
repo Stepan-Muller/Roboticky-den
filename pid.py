@@ -24,8 +24,8 @@ def pid(error):
 	
 	return PID
 
-target_speed = 40
-max_speed = 50
+target_speed = 70
+max_speed = 90
 
 def pid_motor(error):
 	PID = pid(error)

@@ -1,15 +1,17 @@
 import serial
 import time
 
+i = 1
 while True:
 	try:
 		ser = serial.Serial('/dev/ttyACM0', 115200)
 	except:
+		print("Connection failed! Retrying... (", i, ")")
+		i = i + 1
 		continue
 	break
 
 def send_serial(state: bool, speedL: int, speedR: int, pickedColor: bool, resetCount: bool, dump: bool):
-	ser.flushInput()
 	ser.write(bytes([state, 100 + speedL, 100 + speedR, pickedColor, resetCount, dump, 255]))
 
 def read_serial():
@@ -27,6 +29,6 @@ def read_serial():
 	redCount = ord(data[1])
 	blueCount = ord(data[2])
 	
-	print(ord(data[0]), ord(data[1]), ord(data[2]), ord(data[3]), ord(data[4]), ord(data[5]), ord(data[6]))
+	ser.flushInput()
 	
 	return state, redCount, blueCount
