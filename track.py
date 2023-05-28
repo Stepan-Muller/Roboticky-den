@@ -11,14 +11,14 @@ lower_red_1 = np.array([120, 70, 90])
 upper_red_1 = np.array([180, 255, 255])
 
 # Cervena do oranzova
-lower_red_2 = np.array([0, 70, 90])
+lower_red_2 = np.array([0, 90, 90])
 upper_red_2 = np.array([10, 255, 255])
+
+lower_blue = np.array([90, 90, 90])
+upper_blue = np.array([110, 255, 255])
 
 highlight_red_pucks = ([0, 0, 255])
 highlight_red_home = ([0, 0, 100])
-
-lower_blue = np.array([95, 150, 90])
-upper_blue = np.array([110, 255, 255])
 
 highlight_blue_pucks = ([255, 0, 0])
 highlight_blue_home = ([100, 0, 0])
@@ -34,8 +34,8 @@ camera_height = 29.5
 camera_x_offset = 0
 camera_y_offset = 0
 
-time_to_return = float("inf") + time.time()
-home_color = "red"
+time_to_return = 10000 + time.time()
+home_color = "blue"
 
 picam2 = Picamera2()
 picam2.preview_configuration.main.size = (width, height)
@@ -44,11 +44,11 @@ picam2.preview_configuration.align()
 picam2.configure("preview")
 picam2.start()
 
-def go_straight_seconds(seconds):
+def go(seconds, left_speed, right_speed):
 	start_time = time.time()
 	
 	while time.time() < start_time + seconds:
-		parser.send_serial(True, 70, 70, False, False, False)
+		parser.send_serial(True, left_speed, right_speed, False, False, False)
 		
 		time.sleep(0.1)
 
@@ -62,6 +62,28 @@ def get_color_mask(frame, lower_color, upper_color):
 	mask = cv2.dilate(mask, kernel, iterations=1)
 	
 	return mask
+
+def is_above_white(frame, contour):
+	x,y,w,h = cv2.boundingRect(contour)
+	
+	for i in range(y + h + 1, height - 15):
+		color = frame[i, int(x + w / 2)]
+		if int(color[0]) + int(color[1]) + int(color[2]) < 100 * 3:
+			frame[i, int(x + w / 2)] = (0, 0, 0)
+			return False
+			
+		frame[i, int(x + w / 2)] = (255, 255, 255)
+			
+	return True
+
+def get_contours_on_mat(frame, contours):
+	correct_contours = []
+	
+	for contour in contours:
+		if is_above_white(frame, contour):
+			correct_contours.append(contour)
+	
+	return correct_contours	
 
 def get_distance_from_camera(x, y):
 	angle_vertical = (y / -height + 0.5) * camera_fov_vertical + camera_angle
@@ -140,9 +162,7 @@ def track(target):
 	
 	cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 255, 255), 2)
 	target = int(x + w / 2)
-	
-	# Nakreslit caru smeru puku (cil)
-	cv2.line(frame, (target, 0), (target, 480), (0, 0, 255), 2)
+
 	error = width / 2 - target
 	
 	if abs(error) < 20:
@@ -178,13 +198,17 @@ while True:
 	blue_contours, hierarchy = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	red_contours, hierarchy = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 	
+	# Hledat puky a domecek pouze nad platnem - bilou
+	blue_contours = get_contours_on_mat(frame, blue_contours)
+	red_contours = get_contours_on_mat(frame, red_contours)
+	
 	# Najit pouze puky o spravne velikosti
 	blue_pucks = get_contours_of_area(blue_contours, 2, 5)
 	red_pucks = get_contours_of_area(red_contours, 2, 5)
 	
 	# Najit domecky v obraze
-	blue_home = get_biggest_contour(blue_contours, 10)
-	red_home = get_biggest_contour(red_contours, 10)
+	blue_home = get_biggest_contour(blue_contours, 5)
+	red_home = get_biggest_contour(red_contours, 5)
 	
 	# Vykreslit puky a domecky
 	highlight_contours(blue_pucks, highlight_blue_pucks)
@@ -208,20 +232,29 @@ while True:
 		target, target_x, target_y = find_at_coords(pucks, target_x, target_y)
 		track(target)
 		
+		# Pokud puk zajel pod robta, jet chvili rovne
 		x,y,w,h = cv2.boundingRect(target)
 		
 		if last_y == height and not y + h == height:
-			print("konec")
-			go_straight_seconds(0.5)
+			print("puk")
+			go(0.5, 70, 70)
 			
 		last_y = y + h
 	elif time.time() >= time_to_return and not target_home == []:
 		track(target_home)
+		
+		# Pokud vjel robot nad domecek, otocit se, vypustit puky a zastavit
+		x,y,w,h = cv2.boundingRect(target_home)
+		
+		if y + h >= height - 20:
+			print("domecek")
+			go(0.8, 70, 70)
+			go(1.2, 70, -70)
+			# TODO: vypustit puky
+			go(1.7, 70, 70)
+			break
 	else:
 		parser.send_serial(True, 40, -40, False, False, False)
-	
-	# Nakreslit stredovou caru (cil)
-	cv2.line(frame, (int(width / 2), 0), (int(width / 2), height), (0, 255, 0), 2)
 	
 	cv2.imshow("Frame", frame)
 	
