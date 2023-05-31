@@ -5,6 +5,7 @@ import cv2
 from picamera2 import Picamera2
 import numpy as np
 import time
+import statistics
 
 # Cervena do fialova
 lower_red_1 = np.array([120, 70, 90])
@@ -34,8 +35,13 @@ camera_height = 29.5
 camera_x_offset = 0
 camera_y_offset = 0
 
-time_to_return = 10000 + time.time()
-home_color = "blue"
+time_to_return = 0
+start_time = time.time()
+
+dump_pucks = False
+
+# True = modrá, False = červená
+home_color = False
 
 picam2 = Picamera2()
 picam2.preview_configuration.main.size = (width, height)
@@ -45,10 +51,10 @@ picam2.configure("preview")
 picam2.start()
 
 def go(seconds, left_speed, right_speed):
-	start_time = time.time()
+	move_start_time = time.time()
 	
-	while time.time() < start_time + seconds:
-		parser.send_serial(True, left_speed, right_speed, False, False, False)
+	while time.time() < move_start_time + seconds:
+		parser.send_serial(True, left_speed, right_speed, home_color, False, dump_pucks)
 		
 		time.sleep(0.1)
 
@@ -66,7 +72,7 @@ def get_color_mask(frame, lower_color, upper_color):
 def is_above_white(frame, contour):
 	x,y,w,h = cv2.boundingRect(contour)
 	
-	for i in range(y + h + 1, height - 15):
+	for i in range(y + h + 3, height - 15):
 		color = frame[i, int(x + w / 2)]
 		if int(color[0]) + int(color[1]) + int(color[2]) < 100 * 3:
 			frame[i, int(x + w / 2)] = (0, 0, 0)
@@ -75,6 +81,29 @@ def is_above_white(frame, contour):
 		frame[i, int(x + w / 2)] = (255, 255, 255)
 			
 	return True
+
+def send_ray_to_wall(frame, x_offset):
+	for i in range(0, height - 15):
+		y = height - 15 - i
+		
+		color = frame[y, int(width / 2 + x_offset)]
+	
+		if int(color[0]) + int(color[1]) + int(color[2]) < 100 * 3:
+			frame[y, int(width / 2 + x_offset)] = (0, 0, 0)
+			dist_x, dist_y = get_coords_from_camera(width / 2, y)
+			return dist_x
+		
+		frame[y, int(width / 2 + x_offset)] = (255, 255, 255)
+	
+	return float("inf")
+
+def get_dist_from_wall(frame):
+	rays = []
+	
+	for i in range(3):
+		rays.append(send_ray_to_wall(frame, i * 50 - 50))
+		
+	return statistics.median(rays)
 
 def get_contours_on_mat(frame, contours):
 	correct_contours = []
@@ -165,7 +194,7 @@ def track(target):
 
 	error = width / 2 - target
 	
-	if abs(error) < 20:
+	if abs(error) < 25:
 		error = 0
 
 	pid.pid_motor(error)
@@ -176,8 +205,24 @@ last_y = float("inf")
 
 target_x = 0
 target_y = 0
+
+updates_to_disable = 0
+
+last_wall_time = 0
 while True:	
-	print(parser.read_serial())
+	enabled, red_count, blue_count = parser.read_serial()
+	
+	print("Serial:		", enabled, red_count, blue_count)
+	
+	if enabled:
+		updates_to_disable = 10
+	else:
+		updates_to_disable = updates_to_disable - 1
+		
+	if updates_to_disable <= 0:
+		start_time = time.time()
+	
+	print("Time to return:	", int(start_time + time_to_return - time.time() + 0.1))
 	
 	# Vzit obraz z kamery
 	frame = picam2.capture_array()
@@ -219,42 +264,58 @@ while True:
 	if not red_home == []:
 		highlight_contours([red_home], highlight_red_home)
 	
-	if home_color == "blue":
+	if home_color:
 		target_home = blue_home
-	elif home_color == "red":
-		target_home = red_home
 	else:
-		target_home = []
+		target_home = red_home
 	
 	pucks = blue_pucks + red_pucks
 
-	if time.time() < time_to_return and len(pucks) > 0:
-		target, target_x, target_y = find_at_coords(pucks, target_x, target_y)
-		track(target)
-		
-		# Pokud puk zajel pod robta, jet chvili rovne
-		x,y,w,h = cv2.boundingRect(target)
-		
-		if last_y == height and not y + h == height:
-			print("puk")
-			go(0.5, 70, 70)
+	if start_time + 3 < time.time():
+		if time.time() < start_time + time_to_return and red_count < 10 and blue_count < 10:
+			if len(pucks) > 0:
+				target, target_x, target_y = find_at_coords(pucks, target_x, target_y)
+				track(target)
 			
-		last_y = y + h
-	elif time.time() >= time_to_return and not target_home == []:
-		track(target_home)
-		
-		# Pokud vjel robot nad domecek, otocit se, vypustit puky a zastavit
-		x,y,w,h = cv2.boundingRect(target_home)
-		
-		if y + h >= height - 20:
-			print("domecek")
-			go(0.8, 70, 70)
-			go(1.2, 70, -70)
-			# TODO: vypustit puky
-			go(1.7, 70, 70)
-			break
+				# Pokud puk zajel pod robota, jet chvili rovne
+				x,y,w,h = cv2.boundingRect(target)
+				
+				if last_y == height and not y + h == height:
+					print("puk")
+					go(0.5, 70, 70)
+				
+				last_y = y + h
+			else:
+				parser.send_serial(True, 30, -30, home_color, False, dump_pucks)
+		elif time.time() >= start_time + time_to_return or red_count >= 10 or blue_count >= 10:
+			if not target_home == []:
+				track(target_home)
+				
+				# Pokud vjel robot nad domecek, otocit se, vypustit puky a zastavit
+				x,y,w,h = cv2.boundingRect(target_home)
+				
+				if y + h >= height - 20:
+					print("domecek")
+					go(1.2, 70, 70)
+					go(1.5, 70, -70)
+					dump_pucks = True
+					go(1.7, 70, 70)
+					break
+			else:
+				wall_dist = get_dist_from_wall(frame)
+				
+				if wall_dist < 40:
+					last_wall_time = time.time()
+					parser.send_serial(True, -20, 40, home_color, False, dump_pucks)
+				elif wall_dist < 50:
+					last_wall_time = time.time()
+				else:
+					if last_wall_time + 0.7 > time.time():
+						parser.send_serial(True, 0, 40, home_color, False, dump_pucks)
+					else:
+						parser.send_serial(True, 40, 40, home_color, False, dump_pucks)
 	else:
-		parser.send_serial(True, 40, -40, False, False, False)
+		parser.send_serial(True, 0, 0, home_color, False, dump_pucks)
 	
 	cv2.imshow("Frame", frame)
 	
@@ -263,4 +324,4 @@ while True:
 		
 	time.sleep(0.1)
 	
-parser.send_serial(False, 0, 0, False, False, False)
+parser.send_serial(False, 0, 0, home_color, False, dump_pucks)

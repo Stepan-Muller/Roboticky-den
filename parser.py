@@ -20,14 +20,14 @@ def read_serial():
 	while True:
 		byte = ser.read()
 		
-		if byte == bytes([255]) and len(data) > 7:
+		if byte == bytes([255]) and len(data) > 2 and data[len(data) - 3] != bytes([255]) and data[len(data) - 2] != bytes([255]) and data[len(data) - 1] != bytes([255]):
 			break
 			
 		data.append(byte)
 	
-	state = data[0] != bytes([0])
-	redCount = ord(data[1])
-	blueCount = ord(data[2])
+	state = data[0] != bytes([len(data) - 3])
+	redCount = ord(data[len(data) - 2])
+	blueCount = ord(data[len(data) - 1])
 	
 	ser.flushInput()
 	

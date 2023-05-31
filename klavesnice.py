@@ -31,19 +31,21 @@ while True:
 	
 	key = cv2.waitKey(1)
 	
+	release = key == ord('e')
+	
 	if key == ord('q'):
 		break
 	elif key == ord('w'):
-		parser.send_serial(True, speed, speed, False, False, False)
+		parser.send_serial(True, speed, speed, True, False, release)
 	elif key == ord('s'):
-		parser.send_serial(True, -speed, -speed, False, False, False)
+		parser.send_serial(True, -speed, -speed, True, False, release)
 	elif key == ord('a'):
-		parser.send_serial(True, -speed, speed, False, False, False)
+		parser.send_serial(True, -speed, speed, True, False, release)
 	elif key == ord('d'):
-		parser.send_serial(True, speed, -speed, False, False, False)
+		parser.send_serial(True, speed, -speed, True, False, release)
 	else:
-		parser.send_serial(True, 0, 0, False, False, False)
+		parser.send_serial(True, 0, 0, True, False, release)
 		
 	time.sleep(0.1)
 	
-parser.send_serial(False, 0, 0, False, False, False)
+parser.send_serial(False, 0, 0, True, False, False)
